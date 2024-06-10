@@ -1,46 +1,319 @@
-# ArduinoProject
-Brick Breaker Game for Arduino Uno  Experience the classic brick breaker game on Arduino Uno! This project uses an OLED display for gameplay, featuring a paddle, ball mechanics, and score tracking. Enhance your Arduino skills and have fun!
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 
-# Brick Breaker Game for Arduino Uno
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-Welcome to the Brick Breaker Game project for Arduino Uno! This classic game has been brought to life on the Arduino platform, utilizing an OLED display to provide an immersive gameplay experience. Navigate your paddle to break bricks and score high!
 
-## Features
 
-- **Dynamic Paddle Control**: Use a potentiometer to move your paddle across the screen.
-- **Score System**: Earn points by breaking bricks. Try to beat your high score!
-- **Life Count**: You start with three lives, be careful not to let the ball slip past the paddle!
-- **Automatic Level Progression**: As you clear the screen of bricks, the game gets more challenging.
+int seven_seg[] = {4, 5, 8, 7, 6, 3, 2, 9};
 
-## Hardware Requirements
 
-- Arduino Uno
-- Adafruit SSD1306 OLED Display
-- Potentiometer (for paddle control)
-- Push buttons (for starting the game and navigating menus)
-- Wires and breadboard for connections
+int num_array[10][7] = {{ 1, 1, 1, 1, 1, 1, 0 },  
+                        { 0, 1, 1, 0, 0, 0, 0 },  
+                        { 1, 1, 0, 1, 1, 0, 1 },  
+                        { 1, 1, 1, 1, 0, 0, 1 },  
+                        { 0, 1, 1, 0, 0, 1, 1 },  
+                        { 1, 0, 1, 1, 0, 1, 1 },  
+                        { 1, 0, 1, 1, 1, 1, 1 },  
+                        { 1, 1, 1, 0, 0, 0, 0 },  
+                        { 1, 1, 1, 1, 1, 1, 1 },  
+                        { 1, 1, 1, 1, 0, 1, 1 }}; 
 
-## Software Requirements
 
-- Arduino IDE
-- Adafruit GFX Library
-- Adafruit SSD1306 Library
+const int potPin = A0; 
 
-## Setup and Installation
+const int buttonPin = A3; 
+const int upButtonPin = A1; 
+const int downButtonPin = A2; 
 
-1. **Connect the Hardware**: Assemble your circuit according to the schematic provided in the `schematic` folder.
-2. **Install Libraries**: Open Arduino IDE, go to `Sketch > Include Library > Manage Libraries...`, and install `Adafruit GFX` and `Adafruit SSD1306`.
-3. **Load the Code**: Open the `BrickBreaker.ino` file in Arduino IDE, connect your Arduino Uno via USB, and upload the sketch.
+const int Led1 = 13; 
+const int Led2 = 12;
+const int Led3 = 11;
 
-## Controls
+int menuSelection = 0; 
 
-- **Move Paddle**: Turn the potentiometer to move the paddle left or right.
-- **Start Game/Select Option**: Press the start button to begin the game or select an option in the menu.
+const int paddleWidth = 30;
+const int paddleHeight = 4;
+const int paddleSpeed = 3;
+int paddlePosition = SCREEN_WIDTH / 2 - paddleWidth / 2;
 
-## Contributing
+const int ballSize = 3;
+int ballPositionX = SCREEN_WIDTH / 2;
+int ballPositionY = SCREEN_HEIGHT - paddleHeight - ballSize - 1;
+int ballDirectionX = 1;
+int ballDirectionY = -1;
+int ballSpeed = 2; 
 
-Feel free to fork this project, make your own changes, and open a pull request with improvements. All contributions are welcome!
+const int brickWidth = 16;
+const int brickHeight = 8;
+const int brickRows = 4;
+const int brickCols = 8;
+bool bricks[brickRows][brickCols];
+const int brickPadding = 2;
+int brickCount = brickRows * brickCols;
 
-## License
+int score = 0;
+int lives = 3;
+bool gameStarted = false;
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
+void setup() {
+  
+  for (int i = 0; i <= 8; i++) {
+    pinMode(seven_seg[i], OUTPUT);
+  }
+  pinMode(Led1, OUTPUT);
+  pinMode(Led2, OUTPUT);
+  pinMode(Led3, OUTPUT);
+  
+  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(upButtonPin, INPUT_PULLUP);
+  pinMode(downButtonPin, INPUT_PULLUP);
+
+  randomSeed(analogRead(0));
+
+  
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.display();
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.println(F("> OYNA"));
+  display.println(F("  CIKIS"));
+  display.display();
+
+}
+
+void loop() {
+  int buttonState = digitalRead(buttonPin);
+  int upButtonState = digitalRead(upButtonPin);
+  int downButtonState = digitalRead(downButtonPin);
+
+  if (!gameStarted) {
+    
+    if (buttonState == LOW) {
+      if (menuSelection == 0) {
+        gameStarted = true;
+        startGame();
+      } else if (menuSelection == 1) {
+        exitGame();
+      }
+    } else if (upButtonState == LOW) {
+      
+      menuSelection = (menuSelection - 1 + 2) % 2;
+      updateMenuDisplay();
+      delay(200); 
+    } else if (downButtonState == LOW) {
+      
+      menuSelection = (menuSelection + 1) % 2;
+      updateMenuDisplay();
+      delay(200); 
+    }
+  } else {
+    
+    display.clearDisplay();
+    displayPaddle();
+    displayBall();
+    displayBricks();
+    displayLives();
+    display.display();
+
+    movePaddle();
+    moveBall();
+    checkCollisions();
+
+    if (brickCount == 0) {
+      levelComplete();
+    }
+
+    if (lives == 0) {
+      gameOver();
+    }
+
+    delay(20);
+  }
+}
+
+
+
+void updateMenuDisplay() {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.setTextSize(2);
+  if (menuSelection == 0) {
+    display.println(F("> OYNA"));
+    display.println(F("  CIKIS"));
+  } else {
+    display.println(F("  OYNA"));
+    display.println(F("> CIKIS"));
+  }
+  display.display();
+}
+
+
+void startGame() {
+  for (int row = 0; row < brickRows; ++row) {
+    for (int col = 0; col < brickCols; ++col) {
+      bricks[row][col] = true;
+    }
+  }
+}
+
+
+void displayPaddle() {
+    display.fillRect(paddlePosition, SCREEN_HEIGHT - paddleHeight, paddleWidth, paddleHeight, SSD1306_WHITE);
+}
+
+
+void displayBall() {
+    display.fillCircle(ballPositionX, ballPositionY, ballSize, SSD1306_WHITE);
+}
+
+
+void displayBricks() {
+  for (int row = 0; row < brickRows; ++row) {
+    for (int col = 0; col < brickCols; ++col) {
+      if (bricks[row][col]) {
+        int brickX = col * (brickWidth + brickPadding);
+        int brickY = row * (brickHeight + brickPadding);
+        display.fillRect(brickX, brickY, brickWidth, brickHeight, SSD1306_WHITE);
+      }
+    }
+  }
+}
+
+
+void displayLives() {
+
+    
+    const int ledPins[3] = {Led1, Led2, Led3};
+
+    
+    for (int i = 0; i < lives; ++i) {
+        digitalWrite(ledPins[i], HIGH);
+    }
+
+    
+    for (int i = lives; i < 3; ++i) {
+        digitalWrite(ledPins[i], LOW);
+    }
+
+    
+    sev_disp(score % 10); 
+}
+
+
+void movePaddle() {
+    int potValue = analogRead(potPin);
+    paddlePosition = map(potValue, 0, 1023, 0, SCREEN_WIDTH - paddleWidth);
+}
+
+
+void moveBall() {
+  ballPositionX += ballDirectionX * ballSpeed;
+  ballPositionY += ballDirectionY * ballSpeed;
+}
+
+
+void checkCollisions() {
+    
+    if (ballPositionX <= 0 || ballPositionX >= SCREEN_WIDTH - ballSize) {
+        ballDirectionX *= -1; 
+    }
+    
+    if (ballPositionY <= 0) {
+        ballDirectionY *= -1; 
+    }
+    
+    if (ballPositionY >= SCREEN_HEIGHT - ballSize - paddleHeight) {
+        if (ballPositionX >= paddlePosition && ballPositionX <= paddlePosition + paddleWidth) {
+            ballDirectionY *= -1; 
+        } else {
+            
+            ballPositionX = SCREEN_WIDTH / 2;
+            ballPositionY = SCREEN_HEIGHT - paddleHeight - ballSize - 1;
+            ballDirectionX = 1;
+            ballDirectionY = -1;
+            lives--; 
+        }
+    }
+    
+    for (int row = 0; row < brickRows; ++row) {
+        for (int col = 0; col < brickCols; ++col) {
+            if (bricks[row][col]) {
+                int brickX = col * (brickWidth + brickPadding);
+                int brickY = row * (brickHeight + brickPadding);
+                
+                if (ballPositionX + ballSize >= brickX && ballPositionX <= brickX + brickWidth &&
+                    ballPositionY + ballSize >= brickY && ballPositionY <= brickY + brickHeight) {
+                    bricks[row][col] = false; 
+                    brickCount--; 
+                    score++; 
+                    ballDirectionY *= -1; 
+                }
+            }
+        }
+    }
+}
+
+
+void levelComplete() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(10, SCREEN_HEIGHT / 2 - 8);
+    display.println(F("Seviye Tamamlandi!"));
+    display.display();
+    delay(5000);
+    
+    ballPositionX = SCREEN_WIDTH / 2;
+    ballPositionY = SCREEN_HEIGHT - paddleHeight - ballSize - 1;
+    brickCount = brickRows * brickCols; 
+    score = 0; 
+    ballSpeed *= 1.2; 
+    startGame(); 
+}
+
+
+void gameOver() {
+    displayLives(); 
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(10, SCREEN_HEIGHT / 2 - 8);
+    display.print(F("Oyun Bitti"));
+    display.setCursor(10, SCREEN_HEIGHT / 2 + 8);
+    display.println(F("Puaniniz: "));
+    display.setCursor(200, SCREEN_HEIGHT / 2 + 8);
+    display.println(score);
+    display.display();
+    delay(3000);
+    gameStarted = false; 
+    lives = 3; 
+    score = 0; 
+    brickCount = brickRows * brickCols; 
+    sev_disp(score % 10); 
+    updateMenuDisplay(); 
+}
+
+
+void exitGame() {
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print(F("Nesnelerin Interneti dersinde beni dinlediginiz icin tesekkurler."));
+    display.display();
+    delay(3000);
+    updateMenuDisplay(); 
+}
+
+void sev_disp(int rakam) {
+  int pin;
+  for (int j = 0; j < 7; j++) {
+    pin = seven_seg[j];
+    digitalWrite(pin, num_array[rakam][j]); 
+  }
+}
